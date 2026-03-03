@@ -126,22 +126,52 @@ pub enum Schedule {
 // custom ISO-8601 serialization that does not use 6 digits for years.
 mod iso8601 {
     use serde::{ser::Error as _, Serialize, Serializer};
+    use time::OffsetDateTime;
+
+    // On mobile (iOS + Android), serialize to "yyyy-MM-dd'T'HH:mm:ss.SSSZ" with exactly
+    // 3 millisecond digits and a literal Z suffix, matching:
+    //   - iOS: ISO8601DateFormatter with .withInternetDateTime and .withFractionalSeconds
+    //   - Android: JS_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" (SimpleDateFormat)
+
+    // The time crate's default Iso8601 serializer produces nanosecond precision and a
+    // "+00:00" offset, both of which are rejected by the mobile platform parsers.
+    //
+    // On desktop, keep the default Iso8601 format so the Rust deserializer
+    // (time::serde::iso8601::deserialize with Config::DEFAULT) can round-trip correctly.
+
+    #[cfg(mobile)]
+    use time::{format_description::FormatItem, macros::format_description};
+
+    #[cfg(mobile)]
+    const FORMAT: &[FormatItem<'static>] =
+        format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
+
+    #[cfg(not(mobile))]
     use time::{
         format_description::well_known::iso8601::{Config, EncodedConfig},
         format_description::well_known::Iso8601,
-        OffsetDateTime,
     };
 
+    #[cfg(not(mobile))]
     const SERDE_CONFIG: EncodedConfig = Config::DEFAULT.encode();
 
     pub fn serialize<S: Serializer>(
         datetime: &OffsetDateTime,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        datetime
+        #[cfg(mobile)]
+        let formatted = datetime
+            // Make sure we use the right offset
+            .to_offset(time::UtcOffset::UTC)
+            .format(FORMAT)
+            .map_err(S::Error::custom)?;
+
+        #[cfg(not(mobile))]
+        let formatted = datetime
             .format(&Iso8601::<SERDE_CONFIG>)
-            .map_err(S::Error::custom)?
-            .serialize(serializer)
+            .map_err(S::Error::custom)?;
+
+        formatted.serialize(serializer)
     }
 }
 

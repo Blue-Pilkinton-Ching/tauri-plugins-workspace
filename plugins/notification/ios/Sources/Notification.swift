@@ -176,26 +176,25 @@ func handleScheduledNotification(_ schedule: NotificationSchedule) throws
 {
   switch schedule {
   case .at(let date, let repeating):
-    let dateFormatter = DateFormatter()
-    dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-    dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+    // Use ISO8601DateFormatter which is more flexible than DateFormatter
+    // and supports the time format of the custom serializer.
+    let isoFormatter = ISO8601DateFormatter()
+    isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-    if let at = dateFormatter.date(from: date) {
-      let dateInfo = Calendar.current.dateComponents(in: TimeZone.current, from: at)
-
-      if dateInfo.date! < Date() {
+    if let at = isoFormatter.date(from: date) {
+      if at < Date() {
         throw NotificationError.pastScheduledTime
       }
 
-      let dateInterval = DateInterval(start: Date(), end: dateInfo.date!)
+      let timeInterval = at.timeIntervalSince(Date())
 
       // Notifications that repeat have to be at least a minute between each other
-      if repeating && dateInterval.duration < 60 {
+      if repeating && timeInterval < 60 {
         throw NotificationError.triggerRepeatIntervalTooShort
       }
 
       return UNTimeIntervalNotificationTrigger(
-        timeInterval: dateInterval.duration, repeats: repeating)
+        timeInterval: timeInterval, repeats: repeating)
 
     } else {
       throw NotificationError.invalidDate(date)
